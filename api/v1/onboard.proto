@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package onboard.v1;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/vocbl/users-svc/internal/port/grpc/pb;pb";
+
+service Onboard {
+    rpc CheckUsernameAvailability(CheckUsernameAvailabilityRequest) returns (CheckUsernameAvailabilityResponse);
+    rpc Register (RegistrationRequest) returns (RegistrationSession);
+    rpc RegisterGoogle (GoogleRegistrationRequest) returns (RegistrationSession);
+    rpc RestartVerification (RegistrationSession) returns (google.protobuf.Empty);
+    rpc CancelRegistration (RegistrationSession) returns (google.protobuf.Empty);
+    rpc CompleteVerification (VerificationRequest) returns (google.protobuf.Empty);
+}
+
+message CheckUsernameAvailabilityRequest {
+    string username = 1;
+}
+
+message CheckUsernameAvailabilityResponse {
+    bool is_available = 1;
+}
+
+message RegistrationRequest {
+    string email = 1;
+    string password = 2;
+    string first_name = 3;
+    string last_name = 4;
+    string username = 5;
+}
+
+message RegistrationSession {
+    string session_id = 1;
+}
+
+message GoogleRegistrationRequest {
+    string code = 1;
+}
+
+message VerificationRequest {
+     string session_id = 1;
+     string token = 2;
+}
+
