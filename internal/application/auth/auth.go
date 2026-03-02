@@ -30,7 +30,7 @@ type JwtCfg struct {
 }
 
 func NewAuthService(repo AuthRepo, jwt JwtCfg) (*AuthService, error) {
-
+	err := domain.ValidateRefreshTokenDuration(je)
 	return &AuthService{
 		repo: repo,
 		jwt:  jwt,

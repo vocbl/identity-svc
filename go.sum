@@ -70,6 +70,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/vocbl/shared/errors v1.0.5 h1:cELP3KzRHQR6ilOXkCgUbYeFHOoNq/mhnU/NjnYST/A=
 github.com/vocbl/shared/errors v1.0.5/go.mod h1:81K41BiXcnI//MWgDPAq5nHcySbtJVTQlI7BSSLelXk=
+github.com/vocbl/shared/errors v1.0.6 h1:DboikOgNLFsC65l6l1fztAk/uqDaPCv0VfyQBqR81Mo=
+github.com/vocbl/shared/errors v1.0.6/go.mod h1:81K41BiXcnI//MWgDPAq5nHcySbtJVTQlI7BSSLelXk=
 github.com/vocbl/shared/infrastructure v1.0.0 h1:1lVpZASNPfHEKaXFjKOXanc0nU7/CbmEF5c+oEy2aP4=
 github.com/vocbl/shared/infrastructure v1.0.0/go.mod h1:pEfiXgLd4EZmKI4Arp5o4EYMVsEV30ybWHvb1ltwDGI=
 github.com/vocbl/shared/infrastructure v1.0.5 h1:DzO4F5TRWXJmxj1/lfxQLzt138WBN7F1KkFz5ZtO0aY=

@@ -7,33 +7,29 @@ import (
 )
 
 var (
-	// Operations errors
-	ErrCreateVerificationSessionOperation           = errorutil.Operation("failed to create the user")
-	ErrCreateVerificationSessionOperationValidation = errorutil.Validation("failed to create the user")
-	ErrStartVerificationSessionOperation            = errorutil.Operation("failed to start verification session")
-	ErrStartVerificationSessionOperationValidation  = errorutil.Validation("failed to start verification session")
-	ErrGetVerificationExpirationTimeOperation       = errorutil.Validation("failed to get verification session expiration time")
-	ErrCompleteVerificationOperation                = errorutil.Operation("failed to complete user verification session")
-	ErrCheckUsernameAvailabilityOperation           = errorutil.Operation("failed to check username availability")
-	ErrRestartVerificationSessionOperation          = errorutil.Operation("failed to restart user verification session")
-	ErrCleanUpVerificationSessionsOperation         = errorutil.Operation("failed to clean up verification sessions")
-	ErrCreateOauthUserOperation                     = errorutil.Operation("failed to clean up verification sessions")
-	ErrCreateOauthUserOperationValidation           = errorutil.Validation("failed to clean up verification sessions")
+	// Operation Errors: Act as the "Category" or "Context" for logging and tracing.
+	// They describe the high-level intent that failed.
+	ErrSessionCreateOp             = errorutil.Operation("verification.session.create")
+	ErrSessionStartOp              = errorutil.Operation("verification.session.start")
+	ErrSessionDeleteOp             = errorutil.Operation("verification.session.delete")
+	ErrSessionCompleteOp           = errorutil.Operation("verification.session.complete")
+	ErrSessionRestartOp            = errorutil.Operation("verification.session.restart")
+	ErrSessionCleanupOp            = errorutil.Operation("verification.session.cleanup")
+	ErrUsernameAvailabilityCheckOp = errorutil.Operation("user.username.check")
+	ErrExternalUserCreateOp        = errorutil.Operation("user.external.create")
+	ErrExternalIdentityAttachOp    = errorutil.Operation("user.external.link")
 
-	// Client errors
-	ErrExternalIdentityAlreadyExists       = errors.New("external identity already exists")
-	ErrEmailAlreadyExists                  = errors.New("email already exists")
-	ErrUsernameTaken                       = errors.New("username is not available")
-	ErrUserPendingVerification             = errors.New("user already exists, but is not verified yet")
-	ErrInvalidULID                         = errors.New("failed to parse ulid")
-	ErrNonExistingVerificationSession      = errors.New("there is no session associated with the provided id")
-	ErrVerificationSessionAlreadyCompleted = errors.New("user has already completed verification")
-	ErrUserVerificationSessionExpired      = errors.New("session has expired")
-	ErrInvalidToken                        = errors.New("invalid token format")
-	ErrInvalidUsername                     = errors.New("blank username")
-	ErrUserVerificationRestartSince        = errors.New("user session cannot be restarted")
-	ErrUserVerificationRestartAttempts     = errors.New("maximum user restart verification attempts have been reached")
+	// Business Constraint Errors: These represent "State Conflicts."
+	// Application layer translates DB unique constraints into these.
+	ErrConflictEmail            = errors.New("email_already_registered")
+	ErrConflictUsername         = errors.New("username_already_taken")
+	ErrConflictExternalIdentity = errors.New("identity_provider_already_linked")
+	ErrUserUnverified           = errors.New("account_verification_pending")
 
-	// Service Errors
-	ErrUniqueUsernameGeneration = errors.New("failed to generate a unique username")
+	// Resource Availability Errors: Represent "Existence" failures.
+	ErrNotFoundVerificationSession = errors.New("verification_session_not_found")
+	ErrNotFoundUser                = errors.New("user_record_not_found")
+
+	// Internal Fulfillment Errors: The App layer logic reached a dead end.
+	ErrUsernameExhaustion = errors.New("username_collision_limit_reached")
 )

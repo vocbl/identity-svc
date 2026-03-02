@@ -5,148 +5,297 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oklog/ulid"
 	"github.com/stretchr/testify/require"
 	app "github.com/vocbl/users-svc/internal/application/onboard"
-
 	"github.com/vocbl/users-svc/internal/application/onboard/mock"
 	"github.com/vocbl/users-svc/internal/domain"
-	"github.com/vocbl/users-svc/internal/shared/security"
 	"go.uber.org/mock/gomock"
 )
 
-// ============ Service Set Up ==============
-func newRepoMock(t *testing.T) *mock.MockOnboardRepo {
-	ctrl := gomock.NewController(t)
-	t.Cleanup(ctrl.Finish)
+// ============ Controller & Mock Helpers ==============
 
-	return mock.NewMockOnboardRepo(ctrl)
+type testMocks struct {
+	ctrl         *gomock.Controller
+	verification *mock.MockVerificationRepo
+	user         *mock.MockUserRepo
+	starter      *mock.MockVerificationStarterRepo
 }
 
-func newOnboardService(t *testing.T, expectTransaction bool) (*app.OnboardService, *mock.MockOnboardRepo) {
-	mockRepo := newRepoMock(t)
+func newTestMocks(t *testing.T) *testMocks {
+	ctrl := gomock.NewController(t)
+	return &testMocks{
+		ctrl:         ctrl,
+		verification: mock.NewMockVerificationRepo(ctrl),
+		user:         mock.NewMockUserRepo(ctrl),
+		starter:      mock.NewMockVerificationStarterRepo(ctrl),
+	}
+}
+
+func newValidVerificationCfg() app.VerificationCfg {
+	return app.VerificationCfg{
+		MaxAttempts:        domain.TestValidUserVerificationMaxAttempts,
+		ExpirationDuration: domain.TestValidUserVerificationExpireDuration,
+		RestartDuration:    domain.TestValidUserVerificationRestartDuration,
+		CleanUpDuration:    domain.TestValidUserVerificationCleanUpDuration,
+		PasswordHasher: func(s string) (string, error) {
+			return string(domain.TestValidPasswordHash), nil
+		},
+		TokenGenerator: func() (string, string) {
+			return string(domain.TestValidToken), string(domain.TestValidTokenHash)
+		},
+
+		TokenHasher: func(string) string {
+			return string(domain.TestValidTokenHash)
+		},
+	}
+}
+
+func newInvalidVerificationCfg() app.VerificationCfg {
+	return app.VerificationCfg{
+		MaxAttempts:        domain.TestInvalidUserVerificationMaxAttempts,
+		ExpirationDuration: domain.TestInvalidUserVerificationDuration,
+		RestartDuration:    domain.TestInvalidUserVerificationRestartDuration,
+		CleanUpDuration:    domain.TestInvalidUserVerificationCleanUpDuration,
+
+		PasswordHasher: func(s string) (string, error) {
+			return domain.TestInvalidPasswordHash, nil
+		},
+
+		TokenGenerator: func() (string, string) {
+			return domain.TestInvalidToken, domain.TestInvalidTokenHash
+		},
+
+		TokenHasher: func(s string) string {
+			return "mismatch_hash_format_that_does_not_match_generator"
+		},
+	}
+}
+
+// ============ Service Factories ==============
+
+func newOnboardService(t *testing.T, expectTransaction bool) (*app.OnboardService, *mock.MockVerificationRepo) {
+	ctrl := gomock.NewController(t)
+	m := mock.NewMockVerificationRepo(ctrl)
+	s, err := app.NewOnboardService(m, newValidVerificationCfg())
+	require.NoError(t, err)
 
 	if expectTransaction {
-		mockRepo.EXPECT().
+		m.EXPECT().
 			WithinTransaction(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(ctx context.Context, fn func(app.OnboardRepo) error) error {
-				return fn(mockRepo)
-			})
+			DoAndReturn(func(ctx context.Context, fn func(app.VerificationRepo) error) error {
+				return fn(m)
+			}).AnyTimes()
 	}
 
-	service, err := app.NewOnboardService(
-		mockRepo,
-		domain.TestValidVerificationPolicy(),
-		security.HashPassword,
-		security.NewTokenGenerator(domain.TokenLenght),
-	)
+	return s, m
+}
 
+func newVerificationStarterService(t *testing.T, expectTransaction bool) (*app.VerificationStarterService, *mock.MockVerificationStarterRepo) {
+	ctrl := gomock.NewController(t)
+	m := mock.NewMockVerificationStarterRepo(ctrl)
+	s, err := app.NewVerificationStarterService(m, newValidVerificationCfg())
 	require.NoError(t, err)
-	return service, mockRepo
+
+	if expectTransaction {
+		m.EXPECT().
+			WithinTransaction(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, fn func(app.VerificationStarterRepo) error) error {
+				return fn(m)
+			}).AnyTimes()
+	}
+
+	return s, m
 }
 
-//
-//
-//
-//============ Mock Repo Calls=============
+func newExternalIdentityService(t *testing.T, expectTransaction bool) (*app.ExternalIdentityService, *mock.MockUserRepo) {
+	ctrl := gomock.NewController(t)
+	m := mock.NewMockUserRepo(ctrl)
+	s, err := app.NewExternalIdentityService(m, newValidVerificationCfg())
+	require.NoError(t, err)
 
-func expectCheckUsernameExistanceCall(mock *mock.MockOnboardRepo, username string, repoUsernameExists bool, repoErr error) {
-	mock.EXPECT().
+	if expectTransaction {
+		m.EXPECT().
+			WithinTransaction(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, fn func(app.UserRepo) error) error {
+				return fn(m)
+			}).AnyTimes()
+	}
+
+	return s, m
+}
+
+// ============ VerificationRepo (OnboardService) ============
+
+func expectVerificationRepoCheckUsernameExistanceCall(
+	m *mock.MockVerificationRepo,
+	username string,
+	exists bool,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
 		CheckUsernameExistance(gomock.Any(), username).
-		Return(repoUsernameExists, repoErr)
+		Return(exists, err)
 }
 
-func expectSaveUserVerificationSessionCall(mock *mock.MockOnboardRepo, err error) {
-	mock.EXPECT().
-		SaveUserVerificationSession(gomock.Any(), gomock.Any()).
+func expectVerificationRepoCreateCall(
+	m *mock.MockVerificationRepo,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		Create(gomock.Any(), gomock.Any()).
 		Return(err)
 }
 
-func expectEmitVerifyUserEventCall(mock *mock.MockOnboardRepo, email string, err error) {
-	mock.EXPECT().
-		EmitVerifyUserEvent(gomock.Any(), email, gomock.Any()).
+func expectVerificationRepoDeleteCall(
+	m *mock.MockVerificationRepo,
+	id domain.VerificationSessionID,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		Delete(gomock.Any(), id).
 		Return(err)
 }
 
-func expectEmitUserCreatedEventCall(mock *mock.MockOnboardRepo, email, password string, err error) {
-	mock.EXPECT().
-		EmitUserCreatedEvent(gomock.Any(), gomock.Any(), email, password, gomock.Any()).
+func expectVerificationRepoCleanCall(
+	m *mock.MockVerificationRepo,
+	d time.Duration,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		Clean(gomock.Any(), d).
 		Return(err)
 }
 
-func expectRestartUserVerificationSessionCall(mock *mock.MockOnboardRepo, sessionID ulid.ULID, email string, attempts int, err error) {
-	mock.EXPECT().
-		RestartUserVerificationSession(gomock.Any(), sessionID, gomock.Any(), gomock.Any()).
-		Return(email, attempts, err)
-}
-
-func expectCompleteUserVerificationSessionCall(mock *mock.MockOnboardRepo, session *domain.UserVerificationSession, err error) {
-	mock.EXPECT().
-		CompleteUserVerificationSession(gomock.Any(), gomock.Any()).
+func expectVerificationRepoGetCall(
+	m *mock.MockVerificationRepo,
+	sessionID domain.VerificationSessionID,
+	session *domain.UserVerificationSession,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		Get(gomock.Any(), sessionID).
 		Return(session, err)
 }
 
-func expectDeleteVerificationSessionCall(mock *mock.MockOnboardRepo, sessionID ulid.ULID, err error) {
-	mock.EXPECT().
-		DeleteUserVerificationSession(gomock.Any(), sessionID).
+func expectVerificationRepoUpdateCall(
+	m *mock.MockVerificationRepo,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		Update(gomock.Any(), gomock.Any()).
 		Return(err)
 }
 
-func expectSaveUserCall(mock *mock.MockOnboardRepo, err error) {
-	mock.EXPECT().
-		SaveUser(gomock.Any(), gomock.Any()).
+func expectVerificationRepoCreateUserCall(
+	m *mock.MockVerificationRepo,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		CreateUser(gomock.Any(), gomock.Any()).
 		Return(err)
 }
 
-func expectEmitUserVerifiedEventCall(mock *mock.MockOnboardRepo, sessionID ulid.ULID, err error) {
-	mock.EXPECT().
+func expectVerificationRepoEmitVerificationSessionCreatedEventCall(
+	m *mock.MockVerificationRepo,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		EmitVerificationSessionCreatedEvent(
+			gomock.Any(),
+			gomock.Any(),
+			gomock.Any(),
+			gomock.Any(),
+		).
+		Return(err)
+}
+
+func expectVerificationRepoEmitVerificationSessionStartedEventCall(
+	m *mock.MockVerificationRepo,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		EmitVerificationSessionStartedEvent(
+			gomock.Any(),
+			gomock.Any(),
+			gomock.Any(),
+			gomock.Any(),
+		).
+		Return(err)
+}
+
+func expectVerificationRepoEmitUserVerifiedEventCall(
+	m *mock.MockVerificationRepo,
+	sessionID domain.VerificationSessionID,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
 		EmitUserVerifiedEvent(gomock.Any(), sessionID).
 		Return(err)
 }
 
-func expectCleanUpVerificationSessionsCall(mock *mock.MockOnboardRepo, duration time.Duration, err error) {
-	mock.EXPECT().
-		CleanUpVerificationSessions(gomock.Any(), duration).
+// ============ UserRepo (ExternalIdentityService) ============
+
+func expectUserRepoGetByEmailCall(
+	m *mock.MockUserRepo,
+	email domain.Email,
+	user *domain.User,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		GetByEmail(gomock.Any(), email).
+		Return(user, err)
+}
+
+func expectUserRepoCreateCall(
+	m *mock.MockUserRepo,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		Create(gomock.Any(), gomock.Any()).
 		Return(err)
 }
 
-func expectWithinTransactionCall(mock *mock.MockOnboardRepo, err error) {
-	mock.EXPECT().
-		WithinTransaction(gomock.Any(), gomock.Any()).
+func expectUserRepoUpdateCall(
+	m *mock.MockUserRepo,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		Update(gomock.Any(), gomock.Any()).
 		Return(err)
 }
 
-func expectSetUserVerificationSessionPasswordHashCall(mockRepo *mock.MockOnboardRepo, sessionID ulid.ULID, updateErr error,
-) {
-	mockRepo.EXPECT().
-		SetUserVerificationSessionPasswordHash(gomock.Any(), sessionID, gomock.Any()).
-		Return(updateErr)
+// ============ VerificationStarterRepo (VerificationStarterService) ============
+
+func expectVerificationStarterRepoGetCall(
+	m *mock.MockVerificationStarterRepo,
+	sessionID domain.VerificationSessionID,
+	session *domain.UserVerificationSession,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		Get(gomock.Any(), sessionID).
+		Return(session, err)
 }
 
-func expectSaveUserExternalIdentityCall(mockRepo *mock.MockOnboardRepo, email string, userID ulid.ULID, err error) {
-	mockRepo.EXPECT().
-		SaveUserExternalIdentity(gomock.Any(), email, gomock.Any()).
-		Return(userID, err)
+func expectVerificationStarterRepoUpdateCall(
+	m *mock.MockVerificationStarterRepo,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		Update(gomock.Any(), gomock.Any()).
+		Return(err)
 }
 
-// ================== Test Data =========================
-
-func validNewUser() app.NewUser {
-	return app.NewUser{
-		Email:     domain.TestValidEmail,
-		Password:  domain.TestValidPassword,
-		FirstName: domain.TestValidFirstName,
-		LastName:  domain.TestValidLastName,
-		Username:  domain.TestValidUsername,
-	}
-
-}
-
-func validOAuthUser() app.OAuthUser {
-	return app.OAuthUser{
-		Email:      "nazar@example.com",
-		FirstName:  "Nazar",
-		LastName:   "Volynets",
-		ExternalID: "google-sub-12345",
-	}
+func expectVerificationStarterRepoEmitVerificationSessionStartedEventCall(
+	m *mock.MockVerificationStarterRepo,
+	err error,
+) *gomock.Call {
+	return m.EXPECT().
+		EmitVerificationSessionStartedEvent(
+			gomock.Any(),
+			gomock.Any(),
+			gomock.Any(),
+			gomock.Any(),
+		).
+		Return(err)
 }

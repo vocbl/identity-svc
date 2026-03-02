@@ -36,7 +36,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/redis/go-redis/v9 v9.18.0 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
-	github.com/vocbl/shared/errors v1.0.5 // indirect
+	github.com/vocbl/shared/errors v1.0.6 // indirect
 	github.com/vocbl/shared/infrastructure v1.0.5 // indirect
 	github.com/vocbl/shared/logger v1.0.0 // indirect
 	github.com/vocbl/shared/test v1.0.5 // indirect

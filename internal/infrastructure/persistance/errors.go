@@ -4,12 +4,13 @@ import (
 	"errors"
 	"time"
 
-	"github.com/oklog/ulid"
+	"github.com/vocbl/users-svc/internal/domain"
 )
 
 var (
 	ErrDublicateData                   = errors.New("data already exists (unique constraint)")
 	ErrDublicateEmail                  = errors.New("email already exists (unique constraint)")
+	ErrDublicateExternalIdentity       = errors.New("email already exists (unique constraint)")
 	ErrDublicateUsername               = errors.New("username already exists (unique constraint)")
 	ErrNonExistingData                 = errors.New("non-existing data")
 	ErrUserVerificationCompleted       = errors.New("user verification has already been comleted")
@@ -21,7 +22,7 @@ var (
 
 type UserPendingVerificationError struct {
 	RestartableSince time.Time
-	SessionID        ulid.ULID
+	SessionID        domain.VerificationSessionID
 }
 
 func (err UserPendingVerificationError) Error() string {

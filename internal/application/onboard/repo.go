@@ -4,41 +4,43 @@ import (
 	"context"
 	"time"
 
-	"github.com/oklog/ulid"
 	"github.com/vocbl/users-svc/internal/domain"
 )
 
-//go:generate mockgen -destination=./mock/mock_onboard_repo.go -package=mock github.com/vocbl/users-svc/internal/application/onboard OnboardRepo
-type OnboardRepo interface {
-	UserLookupRepo
-	VerificationSessionRepo
-	UserIdentityRepo
-	OnboardingEventRepo
-
-	WithinTransaction(ctx context.Context, fn func(txRepo OnboardRepo) error) error
-}
-
-type UserLookupRepo interface {
+//go:generate mockgen -destination=./mock/mock_verification_repo.go -package=mock github.com/vocbl/users-svc/internal/application/onboard VerificationRepo
+type VerificationRepo interface {
 	CheckUsernameExistance(ctx context.Context, username string) (bool, error)
+
+	Create(ctx context.Context, session *domain.UserVerificationSession) error
+	Delete(ctx context.Context, sessionID domain.VerificationSessionID) error
+	Clean(ctx context.Context, cleanUpVerificationDuration time.Duration) error
+	Get(ctx context.Context, sessionID domain.VerificationSessionID) (*domain.UserVerificationSession, error)
+	Update(ctx context.Context, session *domain.UserVerificationSession) error
+
+	CreateUser(ctx context.Context, user *domain.User) error
+
+	EmitVerificationSessionCreatedEvent(ctx context.Context, sessionID domain.VerificationSessionID, email domain.Email, password domain.Password) error
+	EmitVerificationSessionStartedEvent(ctx context.Context, sessionID domain.VerificationSessionID, email domain.Email, token domain.Token) error
+	EmitUserVerifiedEvent(ctx context.Context, sessionID domain.VerificationSessionID) error
+
+	WithinTransaction(ctx context.Context, fn func(txRepo VerificationRepo) error) error
 }
 
-type VerificationSessionRepo interface {
-	SaveUserVerificationSession(ctx context.Context, session *domain.UserVerificationSession) error
-	SetUserVerificationSessionPasswordHash(ctx context.Context, sessionID ulid.ULID, passwordHash string) error
-	CompleteUserVerificationSession(ctx context.Context, hashedToken string) (*domain.UserVerificationSession, error)
-	RestartUserVerificationSession(ctx context.Context, sessionID ulid.ULID, restartableSince time.Time, hashedToken string) (string, int, error)
-	GetVerificationSessionExpirationTime(ctx context.Context, sessionID ulid.ULID) (time.Time, error)
-	DeleteUserVerificationSession(ctx context.Context, sessionID ulid.ULID) error
-	CleanUpVerificationSessions(ctx context.Context, cleanUpVerificationDuration time.Duration) error
+//go:generate mockgen -destination=./mock/mock_user_repo.go -package=mock github.com/vocbl/users-svc/internal/application/onboard UserRepo
+type UserRepo interface {
+	GetByEmail(ctx context.Context, email domain.Email) (*domain.User, error)
+	Create(ctx context.Context, user *domain.User) error
+	Update(ctx context.Context, user *domain.User) error
+
+	WithinTransaction(ctx context.Context, fn func(txRepo UserRepo) error) error
 }
 
-type UserIdentityRepo interface {
-	SaveUser(ctx context.Context, user *domain.User) error
-	SaveUserExternalIdentity(ctx context.Context, email string, identity domain.ExternalIdentity) (ulid.ULID, error)
-}
+//go:generate mockgen -destination=./mock/mock_verification_starter_repo.go -package=mock github.com/vocbl/users-svc/internal/application/onboard VerificationStarterRepo
+type VerificationStarterRepo interface {
+	Get(ctx context.Context, sessionID domain.VerificationSessionID) (*domain.UserVerificationSession, error)
+	Update(ctx context.Context, session *domain.UserVerificationSession) error
 
-type OnboardingEventRepo interface {
-	EmitUserCreatedEvent(ctx context.Context, sessionID, email, password, token string) error
-	EmitVerifyUserEvent(ctx context.Context, email, token string) error
-	EmitUserVerifiedEvent(ctx context.Context, sessionID ulid.ULID) error
+	EmitVerificationSessionStartedEvent(ctx context.Context, sessionID domain.VerificationSessionID, email domain.Email, token domain.Token) error
+
+	WithinTransaction(ctx context.Context, fn func(txRepo VerificationStarterRepo) error) error
 }

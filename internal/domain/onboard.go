@@ -1,165 +1,296 @@
 package domain
 
 import (
-	"crypto/rand"
-	"database/sql"
-	"encoding/hex"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/oklog/ulid"
-	ulidutil "github.com/vocbl/shared/utils/ulid"
 )
 
-type UserCreds struct {
-	FirstName string
-	LastName  string
-	Username  string
+type TokenHash string
+
+func (th TokenHash) String() string {
+	return string(th)
 }
 
-func (c *UserCreds) Validate() []error {
-	var errs []error
-	if c.FirstName == "" {
-		errs = append(errs, ErrInvalidFirstName)
+func NewTokenHash(tokenHashStr string) (TokenHash, error) {
+	if err := validateTokenHash(tokenHashStr); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidTokenHash, err)
 	}
-
-	if c.LastName == "" {
-		errs = append(errs, ErrInvalidLastName)
-	}
-
-	if c.Username == "" {
-		errs = append(errs, ErrInvalidUsername)
-	}
-
-	return errs
+	return TokenHash(tokenHashStr), nil
 }
 
-func (c *UserCreds) GenerateUsername(suffixLength int) {
-	first := strings.ToLower(strings.ReplaceAll(c.FirstName, " ", ""))
+type Token string
 
-	suffix := make([]byte, suffixLength)
-	rand.Read(suffix)
-
-	c.Username = fmt.Sprintf("%s_%s", first, hex.EncodeToString(suffix))
+func (th Token) String() string {
+	return string(th)
 }
 
-type AuthProvider string
-
-const (
-	AuthProviderGoogle AuthProvider = "Google"
-)
-
-type ExternalIdentity struct {
-	Provider AuthProvider
-	ID       string
-}
-type User struct {
-	ID                 ulid.ULID
-	Email              string
-	PasswordHash       sql.NullString
-	Creds              UserCreds
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	ExternalIdentities []ExternalIdentity
-}
-
-func (u *User) OauthValidateAndEnrich() []error {
-	var errs []error
-
-	if !ValidateEmail(u.Email) {
-		errs = append(errs, ErrInvalidEmail)
+func NewToken(tokenStr string) (Token, error) {
+	if err := validateToken(tokenStr); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
-
-	if u.Creds.FirstName == "" {
-		errs = append(errs, ErrInvalidFirstName)
-	}
-
-	if u.Creds.LastName == "" {
-		errs = append(errs, ErrInvalidLastName)
-	}
-
-	if errs == nil {
-		u.ID = ulidutil.NewULID()
-	}
-
-	return errs
+	return Token(tokenStr), nil
 }
 
 type UserVerificationSession struct {
-	SessionID        ulid.ULID
-	TokenHash        string
-	Email            string
-	PasswordHash     sql.NullString
+	id               VerificationSessionID
+	tokenHash        *TokenHash
+	email            Email
+	passwordHash     *PasswordHash
+	attemptCount     int
 	Creds            UserCreds
-	Duration         time.Duration
-	RestartableSince time.Time
-	CreatedAt        time.Time
-	RestartedAt      time.Time
-	CompletedAt      sql.NullTime
+	expiresAt        *time.Time
+	restartableSince *time.Time
+	createdAt        time.Time
 }
 
-func (uvs *UserVerificationSession) Validate(password string) []error {
-	var errs []error
+func (uvs *UserVerificationSession) ID() VerificationSessionID {
+	return uvs.id
+}
 
-	if !ValidateEmail(uvs.Email) {
-		errs = append(errs, ErrInvalidEmail)
+func (uvs *UserVerificationSession) Email() Email {
+	return uvs.email
+}
+
+func (uvs *UserVerificationSession) RestartableSince() time.Time {
+	return *uvs.restartableSince
+}
+
+func NewUserVerificationSession(emailStr, firstName, lastName, username string) (*UserVerificationSession, error) {
+	var errs error
+
+	email, err := NewEmail(emailStr)
+	if err != nil {
+		errs = errors.Join(errs, err)
 	}
 
-	if !ValidatePassword(password) {
-		errs = append(errs, ErrInvalidPassword)
+	creds, err := NewUserCreds(firstName, lastName, username)
+	if err != nil {
+		errs = errors.Join(errs, err)
 	}
 
-	return append(errs, uvs.Creds.Validate()...)
+	if errs != nil {
+		return nil, errs
+	}
+
+	return &UserVerificationSession{
+		id:    newVerificationSessionID(),
+		email: email,
+		Creds: creds,
+	}, nil
 }
 
-func (uvs *UserVerificationSession) Enrich(tokenHash string, duration time.Duration, restartableSince time.Time) {
-	uvs.TokenHash = tokenHash
-	uvs.SessionID = ulidutil.NewULID()
-	uvs.Duration = duration
-	uvs.RestartableSince = restartableSince
+func RebuildUserVerificationSession(
+	ulid ulid.ULID,
+	tokenHash *TokenHash,
+	email Email,
+	passwordHash *PasswordHash,
+	attemptCount int,
+	creds UserCreds,
+	expiresAt *time.Time,
+	restartableSince *time.Time,
+	createdAt time.Time,
+) *UserVerificationSession {
+	return &UserVerificationSession{
+		id:               newVerificationSessionID(),
+		tokenHash:        tokenHash,
+		email:            email,
+		passwordHash:     passwordHash,
+		attemptCount:     attemptCount,
+		Creds:            creds,
+		expiresAt:        expiresAt,
+		restartableSince: restartableSince,
+		createdAt:        createdAt,
+	}
 }
 
-func (uvs *UserVerificationSession) IsRestartable() bool {
-	return time.Now().UTC().After(uvs.RestartableSince)
+func (uvs *UserVerificationSession) Start(policy VerificationPolicy, passwordHash PasswordHash) (Token, error) {
+	if uvs.IsActive() {
+		return "", ErrSessionAlreadyStarted
+	}
+
+	uvs.passwordHash = &passwordHash
+	return uvs.prepareStart(policy), nil
 }
 
-func (uvs *UserVerificationSession) ToUser(userID ulid.ULID) *User {
+func (uvs *UserVerificationSession) IsActive() bool {
+	return uvs.passwordHash != nil && uvs.expiresAt != nil && uvs.restartableSince != nil && uvs.attemptCount != 0
+}
+
+func (uvs *UserVerificationSession) prepareStart(policy VerificationPolicy) Token {
+	token, tokenHash := policy.generateToken()
+	uvs.tokenHash = &tokenHash
+
+	now := time.Now().UTC()
+	expiresAt := now.Add(policy.expirationDuration)
+	restartableSince := now.Add(policy.restartDuration)
+
+	uvs.restartableSince = &restartableSince
+	uvs.expiresAt = &expiresAt
+
+	uvs.attemptCount++
+
+	return token
+}
+
+func (uvs *UserVerificationSession) ResetToken(policy VerificationPolicy) (Token, error) {
+	if !uvs.IsActive() {
+		return "", ErrSessionNotStarted
+	}
+
+	if !uvs.restartableSince.Before(time.Now().UTC()) {
+		return "", ErrSessionNotRestartable
+	}
+
+	if uvs.attemptCount == policy.maxAttempts {
+		return "", ErrSessionAttemptLimit
+	}
+
+	return uvs.prepareStart(policy), nil
+}
+
+func (uvs *UserVerificationSession) Complete(policy VerificationPolicy, token Token) (*User, error) {
+	if uvs.passwordHash == nil || uvs.expiresAt == nil {
+		return nil, ErrSessionNotStarted
+	}
+
+	if !uvs.expiresAt.After(time.Now().UTC()) {
+		return nil, ErrSessionExpired
+	}
+
+	if tokenHash := policy.hashToken(token); tokenHash != *uvs.tokenHash {
+		return nil, ErrTokenMismatch
+	}
+
 	return &User{
-		ID:           userID,
-		Email:        uvs.Email,
+		id:           newUserID(),
+		email:        uvs.email,
 		Creds:        uvs.Creds,
-		PasswordHash: uvs.PasswordHash,
-	}
+		passwordHash: uvs.passwordHash,
+	}, nil
 }
 
 type VerificationPolicy struct {
-	MaxAttempts     int
-	Duration        time.Duration
-	RestartDuration time.Duration
-	CleanUpDuration time.Duration
+	maxAttempts        int
+	expirationDuration time.Duration
+	restartDuration    time.Duration
+	cleanUpDuration    time.Duration
+	hashPassword       func(password Password) (PasswordHash, error)
+	generateToken      func() (Token, TokenHash)
+	hashToken          func(token Token) TokenHash
 }
 
-func (c VerificationPolicy) Validate() error {
-	err := ValidateUserVerificationSessionDuration(c.Duration)
-	if err != nil {
-		return fmt.Errorf("invalid duration: %w", err)
+func (vp *VerificationPolicy) CleanUpDuration() time.Duration {
+	return vp.cleanUpDuration
+}
+
+type VerificationOption func(*VerificationPolicy) error
+
+func VerificationPolicyMaxAttempts(n int) VerificationOption {
+	return func(p *VerificationPolicy) error {
+		min, max := 2, 10
+		if min >= 2 && max <= 10 {
+			p.maxAttempts = n
+			return nil
+		}
+		return fmt.Errorf("invalid max attempts: expected between %d and %d, got %d", min, max, n)
+	}
+}
+
+func VerificationPolicyExpirationDuration(d time.Duration) VerificationOption {
+	return func(p *VerificationPolicy) error {
+		min, max := 10*time.Minute, 24*time.Hour
+		if d >= min && d <= max {
+			p.expirationDuration = d
+			return nil
+		}
+		return fmt.Errorf("invalid session expiration duration: expected between %v and %v, got %v", min, max, d)
+	}
+}
+func VerificationPolicyRestartDuration(d time.Duration) VerificationOption {
+	return func(p *VerificationPolicy) error {
+		min, max := time.Minute, 10*time.Minute
+		if d >= min && d <= max {
+			p.restartDuration = d
+			return nil
+		}
+		return fmt.Errorf("invalid restart duration: expected between %v and %v, got %v", min, max, d)
+	}
+}
+func VerificationPolicyCleanUpDuration(d time.Duration) VerificationOption {
+	return func(p *VerificationPolicy) error {
+		min, max := 30*time.Minute, 24*time.Hour
+		if d >= min && d <= max {
+			p.cleanUpDuration = d
+			return nil
+		}
+		return fmt.Errorf("invalid cleanup duration: expected between %v and %v, got %v", min, max, d)
+	}
+}
+
+func NewVerificationPolicy(
+	passwordHasher func(password string) (string, error),
+	tokenGenerator func() (string, string),
+	tokenHasher func(token string) string,
+	opts ...VerificationOption,
+) (VerificationPolicy, error) {
+	policy := VerificationPolicy{
+		maxAttempts:        5,
+		expirationDuration: 15 * time.Minute,
+		restartDuration:    2 * time.Minute,
+		cleanUpDuration:    3 * time.Hour,
+		hashPassword: func(password Password) (PasswordHash, error) {
+			passwordHash, err := passwordHasher(string(password))
+			return PasswordHash(passwordHash), err
+		},
+		generateToken: func() (Token, TokenHash) {
+			token, tokenHash := tokenGenerator()
+			return Token(token), TokenHash(tokenHash)
+		},
+
+		hashToken: func(token Token) TokenHash {
+			return TokenHash(tokenHasher(string(token)))
+		},
 	}
 
-	err = ValidateUserVerificationSessionRestartDuration(c.RestartDuration)
+	var errs error
+	token, tokenHash := tokenGenerator()
+	err := validateTokenHash(tokenHash)
 	if err != nil {
-		return fmt.Errorf("invalid restart duration: %w", err)
+		errs = errors.Join(errs, fmt.Errorf("invalid tokenGenerator: %w", err))
 	}
 
-	err = ValidateUserVerificationSessionCleanUpDuration(c.CleanUpDuration)
+	err = validateToken(token)
 	if err != nil {
-		return fmt.Errorf("invalid clean up duration: %w", err)
+		errs = errors.Join(errs, fmt.Errorf("invalid tokenGenerator: %w", err))
 	}
 
-	err = ValidateUserVerificationSessionMaxAttempts(c.MaxAttempts)
-	if err != nil {
-		return fmt.Errorf("invalid max attempts: %w", err)
+	tokenHasherResult := tokenHasher(token)
+	if err = validateTokenHash(tokenHash); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("invalid tokenHasher: %w", err))
+	} else if tokenHasherResult != tokenHash {
+		errs = errors.Join(errs, fmt.Errorf("invalid tokenHasher: does not match the tokenGenerator hash"))
 	}
 
-	return nil
+	passwordHashStr, err := passwordHasher((string(TestValidPassword)))
+	if err != nil {
+		errs = errors.Join(errs, fmt.Errorf("invalid passwordHasher: failed to hash password: %w", err))
+	} else if _, err = NewPasswordHash(passwordHashStr); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("invalid passwordHasher: %w", err))
+	}
+
+	for _, opt := range opts {
+		err = opt(&policy)
+		if err != nil {
+			errs = errors.Join(errs, err)
+		}
+	}
+
+	if errs != nil {
+		return VerificationPolicy{}, errs
+	}
+
+	return policy, nil
 }
