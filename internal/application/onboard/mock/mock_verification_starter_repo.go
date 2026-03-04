@@ -12,6 +12,7 @@ package mock
 import (
 	context "context"
 	reflect "reflect"
+	time "time"
 
 	app "github.com/vocbl/users-svc/internal/application/onboard"
 	domain "github.com/vocbl/users-svc/internal/domain"
@@ -43,17 +44,17 @@ func (m *MockVerificationStarterRepo) EXPECT() *MockVerificationStarterRepoMockR
 }
 
 // EmitVerificationSessionStartedEvent mocks base method.
-func (m *MockVerificationStarterRepo) EmitVerificationSessionStartedEvent(ctx context.Context, sessionID domain.VerificationSessionID, email domain.Email, token domain.Token) error {
+func (m *MockVerificationStarterRepo) EmitVerificationSessionStartedEvent(ctx context.Context, sessionID domain.VerificationSessionID, email domain.Email, token domain.Token, restartableSince time.Time) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "EmitVerificationSessionStartedEvent", ctx, sessionID, email, token)
+	ret := m.ctrl.Call(m, "EmitVerificationSessionStartedEvent", ctx, sessionID, email, token, restartableSince)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // EmitVerificationSessionStartedEvent indicates an expected call of EmitVerificationSessionStartedEvent.
-func (mr *MockVerificationStarterRepoMockRecorder) EmitVerificationSessionStartedEvent(ctx, sessionID, email, token any) *gomock.Call {
+func (mr *MockVerificationStarterRepoMockRecorder) EmitVerificationSessionStartedEvent(ctx, sessionID, email, token, restartableSince any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EmitVerificationSessionStartedEvent", reflect.TypeOf((*MockVerificationStarterRepo)(nil).EmitVerificationSessionStartedEvent), ctx, sessionID, email, token)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EmitVerificationSessionStartedEvent", reflect.TypeOf((*MockVerificationStarterRepo)(nil).EmitVerificationSessionStartedEvent), ctx, sessionID, email, token, restartableSince)
 }
 
 // Get mocks base method.

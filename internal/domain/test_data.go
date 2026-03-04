@@ -2,17 +2,21 @@ package domain
 
 import (
 	"time"
+
+	ulidutil "github.com/vocbl/shared/utils/ulid"
 )
 
 const (
 	// Cfg
 	TestValidUserVerificationMaxAttempts     = 5
+	TestValidUsernameGenerationMaxAttempts   = 3
 	TestValidUserVerificationExpireDuration  = time.Minute * 15
 	TestValidUserVerificationRestartDuration = time.Minute
 	TestValidUserVerificationCleanUpDuration = time.Minute * 40
 	TestValidPasswordChangeDuration          = time.Minute * 15
 
 	TestInvalidUserVerificationMaxAttempts     = 1
+	TestInvalidUsernameGenerationMaxAttempts   = 1
 	TestInvalidUserVerificationDuration        = time.Minute
 	TestInvalidUserVerificationRestartDuration = time.Second
 	TestInvalidUserVerificationCleanUpDuration = time.Minute
@@ -41,6 +45,7 @@ const (
 )
 
 var (
+	TestValidID                    = ulidutil.NewString()
 	TestValidVerificationSessionID = newVerificationSessionID()
 	TestValidUserID                = newUserID()
 )
@@ -92,11 +97,12 @@ func NewValidTestActiveUserVerificationSession() *UserVerificationSession {
 	return s
 }
 
-func NewValidTesInactiveUserVerificationSession() *UserVerificationSession {
-	s := NewValidTestUserVerificationSession()
+func NewValidTestInactiveUserVerificationSession() *UserVerificationSession {
+	s := NewValidTestActiveUserVerificationSession()
 
 	past := time.Now().UTC().Add(-1 * time.Minute)
 	s.restartableSince = &past
+	s.expiresAt = &past
 
 	return s
 }

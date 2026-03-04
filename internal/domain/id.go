@@ -11,6 +11,10 @@ type id struct {
 	ulid.ULID
 }
 
+func (id id) IsNil() bool {
+	return id.Compare(ulid.ULID{}) == 0
+}
+
 func parse(s string) (id, error) {
 	val, err := ulid.Parse(s)
 	if err != nil {
@@ -49,4 +53,13 @@ func ParseUserID(s string) (UserID, error) {
 
 func newUserID() UserID {
 	return UserID{newID()}
+}
+
+type AuthSessionID struct {
+	id
+}
+
+func ParseRefreshTokenID(s string) (AuthSessionID, error) {
+	val, err := parse(s)
+	return AuthSessionID{val}, err
 }

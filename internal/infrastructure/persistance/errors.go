@@ -21,10 +21,11 @@ var (
 )
 
 type UserPendingVerificationError struct {
+	VerificaitonID   domain.VerificationSessionID
+	PasswordHash     domain.PasswordHash
 	RestartableSince time.Time
-	SessionID        domain.VerificationSessionID
 }
 
-func (err UserPendingVerificationError) Error() string {
-	return "user verification has not been competed"
+func (UserPendingVerificationError) Error() string {
+	return "user has not been verified yet"
 }

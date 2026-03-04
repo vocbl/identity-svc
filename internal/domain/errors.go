@@ -14,22 +14,29 @@ var (
 	ErrInvalidDeviceType = errors.New("unsupported_device_type")
 
 	// --- Verification Session Lifecycle ---
-	// These represent violations of the Verification Aggregate's state machine.
-	ErrSessionExpired        = errors.New("verification_session_expired")
-	ErrSessionNotStarted     = errors.New("verification_session_not_active")
-	ErrSessionAlreadyStarted = errors.New("verification_session_already_in_progress")
-	ErrSessionAttemptLimit   = errors.New("verification_attempts_exhausted")
-	ErrSessionNotRestartable = errors.New("verification_restart_cooloff_active")
+	// These represent violations of the Verification Aggregate state machine.
+	ErrVerificationSessionExpired        = errors.New("verification_session_expired")
+	ErrVerificationSessionNotStarted     = errors.New("verification_session_not_active")
+	ErrVerificationSessionAlreadyStarted = errors.New("verification_session_already_in_progress")
+	ErrVerificationSessionAttemptLimit   = errors.New("verification_attempts_exhausted")
+	ErrVerificationSessionNotRestartable = errors.New("verification_restart_cooloff_active")
+
+	// --- Auth Session Lifecycle ---
+	// These represent violations of the Auth Entity state machine.
+	ErrAuthSessionRevoked = errors.New("auth_session_revoked")
+	ErrAuthSessionExpired = errors.New("auth_session_expired")
 
 	// --- Cryptographic & Token Invariants ---
-	ErrTokenMismatch       = errors.New("verification_token_mismatch")
-	ErrInvalidToken        = errors.New("verification_token_malformed")
-	ErrInvalidTokenHash    = errors.New("verification_token_hash_invalid")
+	ErrVerificationTokenMismatch    = errors.New("verification_token_mismatch")
+	ErrVerificationInvalidToken     = errors.New("verification_token_malformed")
+	ErrVerificationInvalidTokenHash = errors.New("verification_token_hash_invalid")
+
 	ErrInvalidPasswordHash = errors.New("password_hash_malformed")
+	ErrPasswordMismatch    = errors.New("password_mismatch")
 
 	// --- Configuration & Policy Invariants ---
-	ErrInvalidSessionDuration        = errors.New("policy_invalid_session_duration")
-	ErrInvalidRestartSessionDuration = errors.New("policy_invalid_restart_window")
+	ErrInvalidVerificationSessionDuration        = errors.New("policy_invalid_session_duration")
+	ErrInvalidVerificationRestartSessionDuration = errors.New("policy_invalid_restart_window")
 
 	// --- Identity Conflicts ---
 	ErrDuplicateExternalIdentity = errors.New("external_identity_already_linked")

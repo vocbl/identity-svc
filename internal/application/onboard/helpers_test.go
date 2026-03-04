@@ -33,10 +33,11 @@ func newTestMocks(t *testing.T) *testMocks {
 
 func newValidVerificationCfg() app.VerificationCfg {
 	return app.VerificationCfg{
-		MaxAttempts:        domain.TestValidUserVerificationMaxAttempts,
-		ExpirationDuration: domain.TestValidUserVerificationExpireDuration,
-		RestartDuration:    domain.TestValidUserVerificationRestartDuration,
-		CleanUpDuration:    domain.TestValidUserVerificationCleanUpDuration,
+		MaxAttempts:                   domain.TestValidUserVerificationMaxAttempts,
+		ExpirationDuration:            domain.TestValidUserVerificationExpireDuration,
+		RestartDuration:               domain.TestValidUserVerificationRestartDuration,
+		CleanUpDuration:               domain.TestValidUserVerificationCleanUpDuration,
+		UsernameGenerationMaxAttempts: domain.TestValidUsernameGenerationMaxAttempts,
 		PasswordHasher: func(s string) (string, error) {
 			return string(domain.TestValidPasswordHash), nil
 		},
@@ -52,10 +53,11 @@ func newValidVerificationCfg() app.VerificationCfg {
 
 func newInvalidVerificationCfg() app.VerificationCfg {
 	return app.VerificationCfg{
-		MaxAttempts:        domain.TestInvalidUserVerificationMaxAttempts,
-		ExpirationDuration: domain.TestInvalidUserVerificationDuration,
-		RestartDuration:    domain.TestInvalidUserVerificationRestartDuration,
-		CleanUpDuration:    domain.TestInvalidUserVerificationCleanUpDuration,
+		MaxAttempts:                   domain.TestInvalidUserVerificationMaxAttempts,
+		ExpirationDuration:            domain.TestInvalidUserVerificationDuration,
+		RestartDuration:               domain.TestInvalidUserVerificationRestartDuration,
+		CleanUpDuration:               domain.TestInvalidUserVerificationCleanUpDuration,
+		UsernameGenerationMaxAttempts: domain.TestInvalidUsernameGenerationMaxAttempts,
 
 		PasswordHasher: func(s string) (string, error) {
 			return domain.TestInvalidPasswordHash, nil
@@ -128,12 +130,11 @@ func newExternalIdentityService(t *testing.T, expectTransaction bool) (*app.Exte
 
 func expectVerificationRepoCheckUsernameExistanceCall(
 	m *mock.MockVerificationRepo,
-	username string,
 	exists bool,
 	err error,
 ) *gomock.Call {
 	return m.EXPECT().
-		CheckUsernameExistance(gomock.Any(), username).
+		CheckUsernameExistance(gomock.Any(), gomock.Any()).
 		Return(exists, err)
 }
 
@@ -296,6 +297,26 @@ func expectVerificationStarterRepoEmitVerificationSessionStartedEventCall(
 			gomock.Any(),
 			gomock.Any(),
 			gomock.Any(),
+			gomock.Any(),
 		).
 		Return(err)
+}
+
+func validNewUser() app.NewUser {
+	return app.NewUser{
+		Email:     domain.TestValidEmail,
+		Password:  domain.TestValidPassword,
+		FirstName: domain.TestValidFirstName,
+		LastName:  domain.TestValidLastName,
+		Username:  domain.TestValidUsername,
+	}
+}
+
+func validOAuthUser() app.OAuthUser {
+	return app.OAuthUser{
+		Email:      string(domain.TestValidEmail),
+		FirstName:  "John",
+		LastName:   "Doe",
+		ExternalID: "external-id",
+	}
 }

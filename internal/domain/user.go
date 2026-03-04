@@ -12,24 +12,38 @@ import (
 	"unicode"
 )
 
+type Username string
+
+func ParseUsername(username string) (Username, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return "", ErrInvalidUsername
+	}
+	return Username(username), nil
+}
+
 type UserCreds struct {
 	firstName string
 	lastName  string
-	username  string
+	username  Username
 }
 
-func NewUserCreds(firstName, lastName, username string) (UserCreds, error) {
+func NewUserCreds(firstName, lastName, usernameStr string) (UserCreds, error) {
 	var errs error
+
+	firstName = strings.TrimSpace(firstName)
 	if firstName == "" {
 		errs = errors.Join(errs, ErrInvalidFirstName)
 	}
 
+	firstName = strings.TrimSpace(lastName)
 	if lastName == "" {
 		errs = errors.Join(errs, ErrInvalidLastName)
 	}
 
-	if username == "" {
-		errs = errors.Join(errs, ErrInvalidUsername)
+	username, err := ParseUsername(usernameStr)
+	if err != nil {
+		errs = errors.Join(errs, err)
 	}
 
 	if errs != nil {
@@ -39,21 +53,21 @@ func NewUserCreds(firstName, lastName, username string) (UserCreds, error) {
 	return UserCreds{
 		firstName: firstName,
 		lastName:  lastName,
-		username:  username,
+		username:  Username(username),
 	}, nil
 }
 
 func (c *UserCreds) GenerateSetUsername(suffixLength int) {
 	first := strings.ToLower(strings.ReplaceAll(c.firstName, " ", ""))
 
-	suffix := make([]byte, 2+suffixLength)
+	suffix := make([]byte, 3+suffixLength)
 	rand.Read(suffix)
 
-	c.username = fmt.Sprintf("%s_%s", first, hex.EncodeToString(suffix))
+	c.username = Username(fmt.Sprintf("%s_%s", first, hex.EncodeToString(suffix)))
 }
 
 func MakeUsername(firstName, lastName string) string {
-	return strings.Join([]string{strings.TrimSpace(firstName), strings.TrimSpace(lastName)}, "_")
+	return strings.ToLower(strings.TrimSpace(firstName) + "_" + strings.TrimSpace(lastName))
 }
 
 type Password string
@@ -67,7 +81,7 @@ func (p Password) Hash(policy VerificationPolicy) (PasswordHash, error) {
 	return PasswordHash(hash), nil
 }
 
-func NewPassword(passwordStr string) (Password, error) {
+func ParsePassword(passwordStr string) (Password, error) {
 	if len(passwordStr) < 6 {
 		return "", ErrInvalidPassword
 	}
@@ -90,7 +104,7 @@ func NewPassword(passwordStr string) (Password, error) {
 
 type PasswordHash string
 
-func NewPasswordHash(passwordHashStr string) (PasswordHash, error) {
+func newPasswordHash(passwordHashStr string) (PasswordHash, error) {
 	const expected = 60
 	actual := len(passwordHashStr)
 	if actual == expected {
@@ -100,15 +114,28 @@ func NewPasswordHash(passwordHashStr string) (PasswordHash, error) {
 
 }
 
+func (ph PasswordHash) Verify(policy *AuthPolicy, password Password) error {
+	passwordHash, err := policy.hashPassword(password)
+	if err != nil {
+		return err
+	}
+
+	if passwordHash != ph {
+		return ErrPasswordMismatch
+	}
+
+	return nil
+}
+
 type Email string
 
-func NewEmail(emailStr string) (Email, error) {
-	addr, err := mail.ParseAddress(emailStr)
-	if err != nil || addr.Address != emailStr {
+func ParseEmail(email string) (Email, error) {
+	addr, err := mail.ParseAddress(strings.TrimSpace(email))
+	if err != nil || addr.Address != email {
 		return "", ErrInvalidEmail
 	}
 
-	return Email(emailStr), nil
+	return Email(addr.Address), nil
 }
 
 type User struct {
@@ -135,7 +162,7 @@ type ExternalIdentity struct {
 func NewUser(emailStr, firstNameStr, lastNameStr, usernameStr string) (*User, error) {
 	var errs error
 
-	email, err := NewEmail(emailStr)
+	email, err := ParseEmail(emailStr)
 	if err != nil {
 		errs = errors.Join(errs, err)
 	}

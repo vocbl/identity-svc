@@ -20,9 +20,9 @@ func TestNewOnboardService(t *testing.T) {
 	})
 
 	t.Run("Total Fail: Domain Policy Violations", func(t *testing.T) {
-		svc, err := app.NewOnboardService(m.verification, newValidVerificationCfg())
-		assert.NoError(t, err)
-		assert.NotNil(t, svc)
+		svc, err := app.NewOnboardService(m.verification, newInvalidVerificationCfg())
+		assert.Error(t, err)
+		assert.Nil(t, svc)
 	})
 }
 

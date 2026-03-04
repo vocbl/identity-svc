@@ -7,13 +7,14 @@ import (
 )
 
 type VerificationCfg struct {
-	MaxAttempts        int
-	ExpirationDuration time.Duration
-	RestartDuration    time.Duration
-	CleanUpDuration    time.Duration
-	PasswordHasher     func(string) (string, error)
-	TokenGenerator     func() (string, string)
-	TokenHasher        func(string) string
+	MaxAttempts                   int
+	ExpirationDuration            time.Duration
+	RestartDuration               time.Duration
+	CleanUpDuration               time.Duration
+	PasswordHasher                func(string) (string, error)
+	TokenGenerator                func() (string, string)
+	TokenHasher                   func(string) string
+	UsernameGenerationMaxAttempts int
 }
 
 func NewOnboardService(
@@ -28,6 +29,7 @@ func NewOnboardService(
 		domain.VerificationPolicyExpirationDuration(cfg.ExpirationDuration),
 		domain.VerificationPolicyCleanUpDuration(cfg.CleanUpDuration),
 		domain.VerificationPolicyRestartDuration(cfg.RestartDuration),
+		domain.VerificationPolicyUsernameGenerationMaxAttempts(cfg.UsernameGenerationMaxAttempts),
 	)
 
 	if err != nil {

@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid"
@@ -14,24 +15,18 @@ func (th TokenHash) String() string {
 	return string(th)
 }
 
-func NewTokenHash(tokenHashStr string) (TokenHash, error) {
-	if err := validateTokenHash(tokenHashStr); err != nil {
-		return "", fmt.Errorf("%w: %w", ErrInvalidTokenHash, err)
-	}
-	return TokenHash(tokenHashStr), nil
-}
-
 type Token string
 
 func (th Token) String() string {
 	return string(th)
 }
 
-func NewToken(tokenStr string) (Token, error) {
-	if err := validateToken(tokenStr); err != nil {
-		return "", fmt.Errorf("%w: %w", ErrInvalidToken, err)
+func ParseToken(token string) (Token, error) {
+	token = strings.TrimSpace(token)
+	if err := validateToken(token); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrVerificationInvalidToken, err)
 	}
-	return Token(tokenStr), nil
+	return Token(token), nil
 }
 
 type UserVerificationSession struct {
@@ -46,6 +41,10 @@ type UserVerificationSession struct {
 	createdAt        time.Time
 }
 
+func (uvs *UserVerificationSession) RestartableSince() time.Time {
+	return *uvs.restartableSince
+}
+
 func (uvs *UserVerificationSession) ID() VerificationSessionID {
 	return uvs.id
 }
@@ -54,14 +53,10 @@ func (uvs *UserVerificationSession) Email() Email {
 	return uvs.email
 }
 
-func (uvs *UserVerificationSession) RestartableSince() time.Time {
-	return *uvs.restartableSince
-}
-
-func NewUserVerificationSession(emailStr, firstName, lastName, username string) (*UserVerificationSession, error) {
+func NewUserVerificationSession(emailStr, passwordStr, firstName, lastName, username string) (*UserVerificationSession, Password, error) {
 	var errs error
 
-	email, err := NewEmail(emailStr)
+	email, err := ParseEmail(emailStr)
 	if err != nil {
 		errs = errors.Join(errs, err)
 	}
@@ -71,15 +66,20 @@ func NewUserVerificationSession(emailStr, firstName, lastName, username string) 
 		errs = errors.Join(errs, err)
 	}
 
+	password, err := ParsePassword(passwordStr)
+	if err != nil {
+		errs = errors.Join(errs, err)
+	}
+
 	if errs != nil {
-		return nil, errs
+		return nil, "", errs
 	}
 
 	return &UserVerificationSession{
 		id:    newVerificationSessionID(),
 		email: email,
 		Creds: creds,
-	}, nil
+	}, password, nil
 }
 
 func RebuildUserVerificationSession(
@@ -108,7 +108,7 @@ func RebuildUserVerificationSession(
 
 func (uvs *UserVerificationSession) Start(policy VerificationPolicy, passwordHash PasswordHash) (Token, error) {
 	if uvs.IsActive() {
-		return "", ErrSessionAlreadyStarted
+		return "", ErrVerificationSessionAlreadyStarted
 	}
 
 	uvs.passwordHash = &passwordHash
@@ -137,15 +137,15 @@ func (uvs *UserVerificationSession) prepareStart(policy VerificationPolicy) Toke
 
 func (uvs *UserVerificationSession) ResetToken(policy VerificationPolicy) (Token, error) {
 	if !uvs.IsActive() {
-		return "", ErrSessionNotStarted
+		return "", ErrVerificationSessionNotStarted
 	}
 
 	if !uvs.restartableSince.Before(time.Now().UTC()) {
-		return "", ErrSessionNotRestartable
+		return "", ErrVerificationSessionNotRestartable
 	}
 
 	if uvs.attemptCount == policy.maxAttempts {
-		return "", ErrSessionAttemptLimit
+		return "", ErrVerificationSessionAttemptLimit
 	}
 
 	return uvs.prepareStart(policy), nil
@@ -153,15 +153,15 @@ func (uvs *UserVerificationSession) ResetToken(policy VerificationPolicy) (Token
 
 func (uvs *UserVerificationSession) Complete(policy VerificationPolicy, token Token) (*User, error) {
 	if uvs.passwordHash == nil || uvs.expiresAt == nil {
-		return nil, ErrSessionNotStarted
+		return nil, ErrVerificationSessionNotStarted
 	}
 
 	if !uvs.expiresAt.After(time.Now().UTC()) {
-		return nil, ErrSessionExpired
+		return nil, ErrVerificationSessionExpired
 	}
 
 	if tokenHash := policy.hashToken(token); tokenHash != *uvs.tokenHash {
-		return nil, ErrTokenMismatch
+		return nil, ErrVerificationTokenMismatch
 	}
 
 	return &User{
@@ -173,17 +173,22 @@ func (uvs *UserVerificationSession) Complete(policy VerificationPolicy, token To
 }
 
 type VerificationPolicy struct {
-	maxAttempts        int
-	expirationDuration time.Duration
-	restartDuration    time.Duration
-	cleanUpDuration    time.Duration
-	hashPassword       func(password Password) (PasswordHash, error)
-	generateToken      func() (Token, TokenHash)
-	hashToken          func(token Token) TokenHash
+	maxAttempts                   int
+	expirationDuration            time.Duration
+	restartDuration               time.Duration
+	cleanUpDuration               time.Duration
+	usernameGenerationMaxAttempts int
+	hashPassword                  func(password Password) (PasswordHash, error)
+	generateToken                 func() (Token, TokenHash)
+	hashToken                     func(token Token) TokenHash
 }
 
 func (vp *VerificationPolicy) CleanUpDuration() time.Duration {
 	return vp.cleanUpDuration
+}
+
+func (vp *VerificationPolicy) UsernameGenerationMaxAttempts() int {
+	return vp.usernameGenerationMaxAttempts
 }
 
 type VerificationOption func(*VerificationPolicy) error
@@ -209,6 +214,7 @@ func VerificationPolicyExpirationDuration(d time.Duration) VerificationOption {
 		return fmt.Errorf("invalid session expiration duration: expected between %v and %v, got %v", min, max, d)
 	}
 }
+
 func VerificationPolicyRestartDuration(d time.Duration) VerificationOption {
 	return func(p *VerificationPolicy) error {
 		min, max := time.Minute, 10*time.Minute
@@ -219,6 +225,7 @@ func VerificationPolicyRestartDuration(d time.Duration) VerificationOption {
 		return fmt.Errorf("invalid restart duration: expected between %v and %v, got %v", min, max, d)
 	}
 }
+
 func VerificationPolicyCleanUpDuration(d time.Duration) VerificationOption {
 	return func(p *VerificationPolicy) error {
 		min, max := 30*time.Minute, 24*time.Hour
@@ -230,6 +237,17 @@ func VerificationPolicyCleanUpDuration(d time.Duration) VerificationOption {
 	}
 }
 
+func VerificationPolicyUsernameGenerationMaxAttempts(n int) VerificationOption {
+	return func(p *VerificationPolicy) error {
+		min, max := 3, 10
+		if n >= min && n <= max {
+			p.usernameGenerationMaxAttempts = n
+			return nil
+		}
+		return fmt.Errorf("invalid username generation max ettempts value: expected between %v and %v, got %v", min, max, n)
+	}
+}
+
 func NewVerificationPolicy(
 	passwordHasher func(password string) (string, error),
 	tokenGenerator func() (string, string),
@@ -237,10 +255,11 @@ func NewVerificationPolicy(
 	opts ...VerificationOption,
 ) (VerificationPolicy, error) {
 	policy := VerificationPolicy{
-		maxAttempts:        5,
-		expirationDuration: 15 * time.Minute,
-		restartDuration:    2 * time.Minute,
-		cleanUpDuration:    3 * time.Hour,
+		maxAttempts:                   5,
+		expirationDuration:            15 * time.Minute,
+		restartDuration:               2 * time.Minute,
+		cleanUpDuration:               3 * time.Hour,
+		usernameGenerationMaxAttempts: 3,
 		hashPassword: func(password Password) (PasswordHash, error) {
 			passwordHash, err := passwordHasher(string(password))
 			return PasswordHash(passwordHash), err
@@ -277,7 +296,7 @@ func NewVerificationPolicy(
 	passwordHashStr, err := passwordHasher((string(TestValidPassword)))
 	if err != nil {
 		errs = errors.Join(errs, fmt.Errorf("invalid passwordHasher: failed to hash password: %w", err))
-	} else if _, err = NewPasswordHash(passwordHashStr); err != nil {
+	} else if _, err = newPasswordHash(passwordHashStr); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("invalid passwordHasher: %w", err))
 	}
 

@@ -44,7 +44,7 @@ func (m *MockVerificationRepo) EXPECT() *MockVerificationRepoMockRecorder {
 }
 
 // CheckUsernameExistance mocks base method.
-func (m *MockVerificationRepo) CheckUsernameExistance(ctx context.Context, username string) (bool, error) {
+func (m *MockVerificationRepo) CheckUsernameExistance(ctx context.Context, username domain.Username) (bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CheckUsernameExistance", ctx, username)
 	ret0, _ := ret[0].(bool)

@@ -3,21 +3,21 @@ package app
 import (
 	"errors"
 
-	errorutil "github.com/vocbl/shared/errors"
+	errutil "github.com/vocbl/shared/errors"
 )
 
 var (
 	// Operation Errors: Act as the "Category" or "Context" for logging and tracing.
 	// They describe the high-level intent that failed.
-	ErrSessionCreateOp             = errorutil.Operation("verification.session.create")
-	ErrSessionStartOp              = errorutil.Operation("verification.session.start")
-	ErrSessionDeleteOp             = errorutil.Operation("verification.session.delete")
-	ErrSessionCompleteOp           = errorutil.Operation("verification.session.complete")
-	ErrSessionRestartOp            = errorutil.Operation("verification.session.restart")
-	ErrSessionCleanupOp            = errorutil.Operation("verification.session.cleanup")
-	ErrUsernameAvailabilityCheckOp = errorutil.Operation("user.username.check")
-	ErrExternalUserCreateOp        = errorutil.Operation("user.external.create")
-	ErrExternalIdentityAttachOp    = errorutil.Operation("user.external.link")
+	ErrSessionCreateOp             = errutil.NewOperationSt("verification.session.create")
+	ErrSessionStartOp              = errutil.NewOperationSt("verification.session.start")
+	ErrSessionDeleteOp             = errutil.NewOperationSt("verification.session.delete")
+	ErrSessionCompleteOp           = errutil.NewOperationSt("verification.session.complete")
+	ErrSessionRestartOp            = errutil.NewOperationSt("verification.session.restart")
+	ErrSessionCleanupOp            = errutil.NewOperationSt("verification.session.cleanup")
+	ErrUsernameAvailabilityCheckOp = errutil.NewOperationSt("user.username.check")
+	ErrExternalUserCreateOp        = errutil.NewOperationSt("user.external.create")
+	ErrExternalIdentityAttachOp    = errutil.NewOperationSt("user.external.link")
 
 	// Business Constraint Errors: These represent "State Conflicts."
 	// Application layer translates DB unique constraints into these.
@@ -25,6 +25,7 @@ var (
 	ErrConflictUsername         = errors.New("username_already_taken")
 	ErrConflictExternalIdentity = errors.New("identity_provider_already_linked")
 	ErrUserUnverified           = errors.New("account_verification_pending")
+	ErrUserPendingVerification  = errors.New("user_pending_verification")
 
 	// Resource Availability Errors: Represent "Existence" failures.
 	ErrNotFoundVerificationSession = errors.New("verification_session_not_found")

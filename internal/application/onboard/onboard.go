@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/vocbl/users-svc/internal/domain"
 	db "github.com/vocbl/users-svc/internal/infrastructure/persistance"
@@ -22,9 +21,10 @@ type NewUser struct {
 	Username  string
 }
 
-func (s *OnboardService) CheckUsernameAvailability(ctx context.Context, username string) (bool, error) {
-	if username == "" {
-		return false, ErrUsernameAvailabilityCheckOp.Wrap(domain.ErrInvalidUsername)
+func (s *OnboardService) CheckUsernameAvailability(ctx context.Context, usernameStr string) (bool, error) {
+	username, err := domain.ParseUsername(usernameStr)
+	if err != nil {
+		return false, ErrUsernameAvailabilityCheckOp.Wrap(err)
 	}
 
 	exists, err := s.repo.CheckUsernameExistance(ctx, username)
@@ -35,21 +35,11 @@ func (s *OnboardService) CheckUsernameAvailability(ctx context.Context, username
 	return !exists, nil
 }
 
-func (s *OnboardService) CreateVerificationSession(ctx context.Context, user NewUser) (domain.VerificationSessionID, time.Time, error) {
-	var errs error
+func (s *OnboardService) CreateVerificationSession(ctx context.Context, user NewUser) (domain.VerificationSessionID, error) {
+	session, password, err := domain.NewUserVerificationSession(user.Email, user.Password, user.FirstName, user.LastName, user.Username)
 
-	session, err := domain.NewUserVerificationSession(user.Email, user.FirstName, user.LastName, user.Username)
 	if err != nil {
-		errs = errors.Join(errs, err)
-	}
-
-	password, err := domain.NewPassword(user.Password)
-	if err != nil {
-		errs = errors.Join(errs, err)
-	}
-
-	if errs != nil {
-		ErrSessionCreateOp.ValidationWrap(errs)
+		return domain.VerificationSessionID{}, ErrSessionCreateOp.WrapValidation(err)
 	}
 
 	err = s.repo.WithinTransaction(ctx, func(txRepo VerificationRepo) error {
@@ -62,27 +52,24 @@ func (s *OnboardService) CreateVerificationSession(ctx context.Context, user New
 	})
 
 	if err != nil {
-		var sessionID domain.VerificationSessionID
-		var restartableSince time.Time
+		var errs error
 
-		switch {
-		case errors.Is(err, db.ErrDublicateEmail):
-			err = ErrConflictEmail
-		case errors.Is(err, db.ErrDublicateUsername):
-			err = ErrConflictUsername
-		default:
-			var upvErr db.UserPendingVerificationError
-			if errors.As(err, &upvErr) {
-				err = ErrUserUnverified
-				sessionID = upvErr.SessionID
-				restartableSince = upvErr.RestartableSince
-			}
-
+		if errors.Is(err, db.ErrDublicateEmail) {
+			errs = errors.Join(errs, ErrConflictEmail)
 		}
-		return sessionID, restartableSince, ErrSessionCreateOp.Wrap(err)
+
+		if errors.Is(err, db.ErrDublicateUsername) {
+			errs = errors.Join(errs, ErrConflictUsername)
+		}
+
+		if errs != nil {
+			return domain.VerificationSessionID{}, ErrSessionCreateOp.WrapFew(err, errs)
+		}
+
+		return domain.VerificationSessionID{}, ErrSessionCreateOp.Wrap(err)
 	}
 
-	return session.ID(), session.RestartableSince(), nil
+	return session.ID(), nil
 }
 
 func (s *OnboardService) RestartVerificationSession(ctx context.Context, id string) error {
@@ -111,10 +98,7 @@ func (s *OnboardService) RestartVerificationSession(ctx context.Context, id stri
 	})
 
 	if err != nil {
-		if errors.Is(err, db.ErrNonExistingData) {
-			err = ErrNotFoundVerificationSession
-		}
-		return ErrSessionRestartOp.Wrap(err)
+		return ErrSessionRestartOp.WrapIs(err, db.ErrNonExistingData, ErrNotFoundVerificationSession)
 	}
 
 	return nil
@@ -128,10 +112,7 @@ func (s *OnboardService) DeleteVerificationSession(ctx context.Context, id strin
 
 	err = s.repo.Delete(ctx, sessionID)
 	if err != nil {
-		if errors.Is(err, db.ErrNonExistingData) {
-			err = ErrNotFoundVerificationSession
-		}
-		return ErrSessionDeleteOp.Wrap(err)
+		return ErrSessionRestartOp.WrapIs(err, db.ErrNonExistingData, ErrNotFoundVerificationSession)
 	}
 
 	return nil
@@ -143,7 +124,7 @@ func (s *OnboardService) CompleteVerification(ctx context.Context, id, tokenStr 
 		return ErrSessionCompleteOp.Wrap(err)
 	}
 
-	token, err := domain.NewToken(tokenStr)
+	token, err := domain.ParseToken(tokenStr)
 	if err != nil {
 		return ErrSessionCompleteOp.Wrap(err)
 	}

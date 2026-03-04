@@ -23,15 +23,15 @@ type OAuthUser struct {
 func (s *ExternalIdentityService) CreateUserFromExternalIdentity(ctx context.Context, provider domain.AuthProvider, ou OAuthUser) error {
 	user, err := domain.NewUser(ou.Email, ou.FirstName, ou.LastName, domain.MakeUsername(ou.FirstName, ou.LastName))
 	if err != nil {
-		return ErrExternalUserCreateOp.ValidationWrap(err)
+		return ErrExternalUserCreateOp.WrapValidation(err)
 	}
 
 	err = user.AddExternalIdentity(ou.ExternalID, provider)
 	if err != nil {
-		return ErrExternalUserCreateOp.ValidationWrap(err)
+		return ErrExternalUserCreateOp.WrapValidation(err)
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < s.verificationPolicy.UsernameGenerationMaxAttempts(); i++ {
 		err = s.repo.Create(ctx, user)
 		if err == nil {
 			return nil
@@ -53,9 +53,9 @@ func (s *ExternalIdentityService) CreateUserFromExternalIdentity(ctx context.Con
 }
 
 func (s *ExternalIdentityService) AtachUserExternalIdentity(ctx context.Context, emailStr string, provider domain.AuthProvider, externalID string) error {
-	email, err := domain.NewEmail(emailStr)
+	email, err := domain.ParseEmail(emailStr)
 	if err != nil {
-		return ErrExternalIdentityAttachOp.ValidationWrap(err)
+		return ErrExternalIdentityAttachOp.WrapValidation(err)
 	}
 
 	err = s.repo.WithinTransaction(ctx, func(txRepo UserRepo) error {

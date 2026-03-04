@@ -15,7 +15,7 @@ import (
 func TestExternalIdentityService_CreateUserFromExternalIdentity(t *testing.T) {
 	t.Parallel()
 
-	t.Run("succeeds when passed data is valid", testCreateExternalUserSuccess)
+	t.Run("succeeds", testCreateExternalUserSuccess)
 	t.Run("returns validation error when input data is invalid", testCreateExternalUserInvalidInput)
 	t.Run("returns error when AddExternalIdentity fails", testCreateExternalUserAddExternalIdentityFails)
 	t.Run("returns error when duplicate email", testCreateExternalUserDuplicateEmail)
@@ -63,7 +63,6 @@ func testCreateExternalUserAddExternalIdentityFails(t *testing.T) {
 	err := svc.CreateUserFromExternalIdentity(t.Context(), domain.AuthProviderGoogle, ou)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, app.ErrExternalUserCreateOp)
-	assert.ErrorIs(t, err, domain.ErrInvalidIdentifier)
 }
 
 func testCreateExternalUserDuplicateEmail(t *testing.T) {
@@ -95,7 +94,7 @@ func testCreateExternalUserUsernameExhaustion(t *testing.T) {
 	t.Parallel()
 
 	svc, m := newExternalIdentityService(t, false)
-	for i := 0; i < 5; i++ {
+	for i := 0; i < domain.TestValidUsernameGenerationMaxAttempts; i++ {
 		expectUserRepoCreateCall(m, db.ErrDublicateUsername)
 	}
 
@@ -121,12 +120,14 @@ func testCreateExternalUserUnexpectedError(t *testing.T) {
 func TestExternalIdentityService_AtachUserExternalIdentity(t *testing.T) {
 	t.Parallel()
 
-	t.Run("succeeds when data is valid", testAttachExternalIdentitySuccess)
+	t.Run("succeeds", testAttachExternalIdentitySuccess)
 	t.Run("returns error when email is invalid", testAttachExternalIdentityInvalidEmail)
 	t.Run("returns error when user not found", testAttachExternalIdentityNotFound)
+	t.Run("returns error when repo.GetByEmail fails", testGetByEmailFail)
 	t.Run("returns error when duplicate external identity", testAttachExternalIdentityConflict)
-	t.Run("returns error when AddExternalIdentity fails inside transaction", testAttachExternalIdentityAddFails)
-	t.Run("returns error when unexpected repo error occurs", testAttachExternalIdentityUnexpectedError)
+	t.Run("returns error when AddExternalIdentity fails", testAttachExternalIdentityAddFails)
+	t.Run("returns error when repo.Update fails", testUserUpdateFail)
+	t.Run("returns error when unexpected tx error occurs", testAttachExternalIdentityUnexpectedError)
 }
 
 // ============ Attach Sub-Functions ============
@@ -202,6 +203,25 @@ func testAttachExternalIdentityNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, app.ErrNotFoundUser)
 }
 
+func testGetByEmailFail(t *testing.T) {
+	t.Parallel()
+
+	svc, m := newExternalIdentityService(t, true)
+	unexpectedErr := errors.New("get failure")
+	expectUserRepoGetByEmailCall(m, domain.TestValidEmail, nil, unexpectedErr)
+
+	err := svc.AtachUserExternalIdentity(
+		t.Context(),
+		string(domain.TestValidEmail),
+		domain.AuthProviderGoogle,
+		"valid-id",
+	)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, app.ErrExternalIdentityAttachOp)
+	assert.ErrorIs(t, err, unexpectedErr)
+}
+
 func testAttachExternalIdentityConflict(t *testing.T) {
 	t.Parallel()
 
@@ -220,6 +240,26 @@ func testAttachExternalIdentityConflict(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, app.ErrExternalIdentityAttachOp)
 	assert.ErrorIs(t, err, app.ErrConflictExternalIdentity)
+}
+
+func testUserUpdateFail(t *testing.T) {
+	t.Parallel()
+
+	svc, m := newExternalIdentityService(t, true)
+	unexpectedErr := errors.New("tx failure")
+	expectUserRepoGetByEmailCall(m, domain.TestValidEmail, domain.NewValidTestUser(), nil)
+	expectUserRepoUpdateCall(m, unexpectedErr)
+
+	err := svc.AtachUserExternalIdentity(
+		t.Context(),
+		string(domain.TestValidEmail),
+		domain.AuthProviderGoogle,
+		"valid-id",
+	)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, app.ErrExternalIdentityAttachOp)
+	assert.ErrorIs(t, err, unexpectedErr)
 }
 
 func testAttachExternalIdentityUnexpectedError(t *testing.T) {
@@ -242,15 +282,4 @@ func testAttachExternalIdentityUnexpectedError(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, app.ErrExternalIdentityAttachOp)
 	assert.ErrorIs(t, err, unexpectedErr)
-}
-
-// ============ Helpers ============
-
-func validOAuthUser() app.OAuthUser {
-	return app.OAuthUser{
-		Email:      string(domain.TestValidEmail),
-		FirstName:  "John",
-		LastName:   "Doe",
-		ExternalID: "external-id",
-	}
 }

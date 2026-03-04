@@ -3,151 +3,71 @@ package app
 import (
 	"context"
 	"errors"
-	"time"
 
-	"github.com/oklog/ulid"
 	"github.com/vocbl/users-svc/internal/domain"
 	db "github.com/vocbl/users-svc/internal/infrastructure/persistance"
 	"github.com/vocbl/users-svc/internal/shared/security"
-	"go.uber.org/zap"
 )
 
 type AuthService struct {
-	repo               AuthRepo
-	logger             *zap.Logger
-	cache              authCache
-	jwt                JwtCfg
-	generateRefreshJWT func(userID string, duration time.Duration) (string, ulid.ULID, error)
-	generateAccessJWT  func(userID string, duration time.Duration) (string, error)
-	//returns tokenID, userID and error
-	verifyRefreshJWT func(token string) (ulid.ULID, ulid.ULID, error)
-	verifyPassword   func(string, string) bool
+	repo   AuthRepo
+	cache  authCache
+	policy *domain.AuthPolicy
 }
 
-type JwtCfg struct {
-	RefreshDuration time.Duration
-	AccessDuration  time.Duration
-}
-
-func NewAuthService(repo AuthRepo, jwt JwtCfg) (*AuthService, error) {
-	err := domain.ValidateRefreshTokenDuration(je)
-	return &AuthService{
-		repo: repo,
-		jwt:  jwt,
-	}
-}
-
-// returns refresh token, access token, verificationSessionID and error
-func (s *AuthService) Login(ctx context.Context, email, password, deviceType, devicePlatform string) (string, string, error) {
-	if !domain.ValidateEmail(email) {
-		return "", "", ErrLoginOperation.Wrap(ErrInvalidEmail)
-	}
-
-	hashedPassword, userID, err := s.repo.GetAuthData(ctx, email)
+func (s *AuthService) Login(ctx context.Context, emailStr, passwordStr, deviceType, devicePlatform string) (domain.RefreshToken, domain.AccessToken, error) {
+	email, err := domain.ParseEmail(emailStr)
 	if err != nil {
-		var upvErr db.UserPendingVerificationError
-		if errors.As(err, &upvErr) {
-			if !s.verifyPassword(password, hashedPassword) {
-				return "", "", ErrLoginOperation.Wrap(ErrInvalidPassword)
-			}
+		return domain.RefreshToken{}, domain.AccessToken{}, ErrLoginOperation.Wrap(err)
+	}
 
-			return "", "", &ErrUserPendingVerification{upvErr.SessionID, upvErr.RestartableSince}
-		} else if errors.Is(err, db.ErrNonExistingData) {
+	password, err := domain.ParsePassword(passwordStr)
+	if err != nil {
+		return domain.RefreshToken{}, domain.AccessToken{}, ErrLoginOperation.Wrap(err)
+	}
+
+	hashedPassword, userID, verified, err := s.repo.GetAuthData(ctx, email)
+	if err != nil {
+		if errors.Is(err, db.ErrNonExistingData) {
 			err = ErrNonExistingUser
+			s.policy.DummyPasswordCheck()
 		}
-		return "", "", ErrLoginOperation.Wrap(err)
+		return domain.RefreshToken{}, domain.AccessToken{}, ErrLoginOperation.Wrap(err)
 	}
 
-	if !s.verifyPassword(password, hashedPassword) {
-		return "", "", ErrLoginOperation.Wrap(ErrInvalidPassword)
+	if !verified {
+		return domain.RefreshToken{}, domain.AccessToken{}, ErrLoginOperation.Wrap(ErrUserPendingVerification)
 	}
 
-	refreshToken, refreshTokenID, err := s.generateRefreshJWT(userID.String(), s.jwt.RefreshDuration)
+	err = hashedPassword.Verify(s.policy, password)
 	if err != nil {
-		return "", "", ErrLoginOperation.Wrap(err)
+		return domain.RefreshToken{}, domain.AccessToken{}, ErrLoginOperation.Wrap(err)
 	}
 
-	accessToken, err := s.generateAccessJWT(userID.String(), s.jwt.AccessDuration)
+	authSession, refreshToken, err := domain.NewUserAuthSession(s.policy, userID, deviceType, devicePlatform)
 	if err != nil {
-		return "", "", ErrLoginOperation.Wrap(err)
+		return domain.RefreshToken{}, domain.AccessToken{}, ErrLoginOperation.Wrap(err)
 	}
 
-	userJwtSession, err := domain.NewUserJwtSession(userID, refreshTokenID, s.jwt.RefreshDuration, deviceType, devicePlatform)
+	accessToken, err := authSession.GenerateAccessToken(s.policy)
 	if err != nil {
-		return "", "", ErrLoginOperation.Wrap(err)
+		return domain.RefreshToken{}, domain.AccessToken{}, ErrLoginOperation.Wrap(err)
 	}
 
 	err = s.repo.WithinTransaction(ctx, func(txRepo AuthRepo) error {
-		err := txRepo.SaveSession(ctx, userJwtSession)
+		err := txRepo.SaveSession(ctx, authSession)
 		if err != nil {
 			return err
 		}
 
-		return txRepo.EmitNewSessionEvent(ctx, refreshTokenID, s.jwt.RefreshDuration)
+		return txRepo.EmitNewSessionEvent(ctx, authSession.ID)
 	})
 
 	if err != nil {
-		return "", "", ErrLoginOperation.Wrap(err)
+		return domain.RefreshToken{}, domain.AccessToken{}, ErrLoginOperation.Wrap(err)
 	}
 
 	return refreshToken, accessToken, nil
-}
-
-// func (s *AuthService) GetSessions(ctx context.Context, stringUserID, password string) ([]domain.UserJwtSession, error) {
-// 	userID, err := ulid.Parse(stringUserID)
-// 	if err != nil {
-// 		return nil, ErrGetSessionsOperation.Wrap(ErrInvalidRefreshTokenID)
-// 	}
-
-// 	hashedPassword, err := s.repo.GetUserPasswordHash(ctx, userID)
-// 	if err != nil {
-// 		var upvErr db.UserPendingVerificationError
-// 		if errors.As(err, &upvErr) {
-// 			if !s.verifyPassword(password, hashedPassword) {
-// 				return "", "", ErrLoginOperation.Wrap(ErrInvalidPassword)
-// 			}
-
-// 			return "", "", &ErrUserPendingVerification{upvErr.SessionID, upvErr.RestartableSince}
-// 		} else if errors.Is(err, db.ErrNonExistingData) {
-// 			err = ErrNonExistingUser
-// 		}
-// 		return "", "", ErrLoginOperation.Wrap(err)
-// 	}
-
-// 	sessions, err := s.repo.GetSessions(ctx, userID)
-// 	if err != nil {
-// 		if errors.Is(err, db.ErrNonExistingData) {
-// 			return nil, ErrGetSessionsOperation.Wrap(ErrNonExistingUser)
-// 		}
-// 		return nil, ErrGetSessionsOperation.Wrap(err)
-// 	}
-
-// 	return sessions, nil
-// }
-
-func (s *AuthService) RevokeSession(ctx context.Context, refreshJWT string) error {
-	tokenID, userID, err := s.verifyRefreshJWT(refreshJWT)
-	if err != nil {
-		return ErrRevokeSessionOperation.Wrap(ErrInvalidRefreshToken)
-	}
-
-	err = s.repo.WithinTransaction(ctx, func(txRepo AuthRepo) error {
-		err := txRepo.RevokeSession(ctx, userID, tokenID)
-		if err != nil {
-			return err
-		}
-
-		return txRepo.EmitSessionRevokationEvent(ctx, tokenID)
-	})
-
-	if err != nil {
-		if errors.Is(err, db.ErrNonExistingData) {
-			err = ErrNonExistingSession
-		}
-		return ErrRevokeSessionOperation.Wrap(err)
-	}
-
-	return nil
 }
 
 func (s *AuthService) IssueAccessToken(ctx context.Context, refreshJWT string) (string, error) {

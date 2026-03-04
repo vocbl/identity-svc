@@ -21,18 +21,18 @@ func (s *VerificationStarterService) StartVerificationSession(ctx context.Contex
 		errs = errors.Join(errs, err)
 	}
 
-	email, err := domain.NewEmail(emailStr)
+	email, err := domain.ParseEmail(emailStr)
 	if err != nil {
 		errs = errors.Join(errs, err)
 	}
 
-	password, err := domain.NewPassword(passwordStr)
+	password, err := domain.ParsePassword(passwordStr)
 	if err != nil {
 		errs = errors.Join(errs, err)
 	}
 
 	if errs != nil {
-		return ErrSessionStartOp.ValidationWrap(errs)
+		return ErrSessionStartOp.WrapValidation(errs)
 	}
 
 	passwordHash, err := password.Hash(s.verificationPolicy)
@@ -56,7 +56,7 @@ func (s *VerificationStarterService) StartVerificationSession(ctx context.Contex
 			return err
 		}
 
-		return txRepo.EmitVerificationSessionStartedEvent(ctx, sessionID, email, token)
+		return txRepo.EmitVerificationSessionStartedEvent(ctx, sessionID, email, token, session.RestartableSince())
 	})
 
 	if err != nil {
